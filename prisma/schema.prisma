@@ -1,0 +1,546 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Authentication (better-auth core tables)
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String   @id @default(uuid())
+  name          String
+  email         String   @unique
+  emailVerified Boolean  @default(false)
+  image         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  sessions           Session[]
+  accounts           Account[]
+  memberships        OrganizationMember[]
+  projectMemberships ProjectMember[]
+  assignments        Assignment[]         @relation("ActorAssignments")
+  notifications      Notification[]
+  comments           Comment[]
+  reviewDecisions    ReviewDecision[]
+  recordingVersions  RecordingVersion[]
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id @default(uuid())
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id @default(uuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy
+// ---------------------------------------------------------------------------
+
+enum OrgRole {
+  OWNER
+  MANAGER
+  EDITOR
+  ACTOR
+}
+
+enum ProjectRole {
+  MANAGER
+  EDITOR
+  ACTOR
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members     OrganizationMember[]
+  invitations Invitation[]
+  projects    Project[]
+  credentials AIProviderCredential[]
+  jobs        AIGenerationJob[]
+  auditEvents AuditEvent[]
+  aiUsage     AIUsage[]
+}
+
+model OrganizationMember {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           OrgRole
+  createdAt      DateTime     @default(now())
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+}
+
+model Invitation {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  email          String
+  role           OrgRole
+  projectId      String?
+  project        Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectRole    ProjectRole?
+  tokenHash      String       @unique
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  invitedById    String
+  createdAt      DateTime     @default(now())
+
+  @@index([email])
+}
+
+// ---------------------------------------------------------------------------
+// Projects
+// ---------------------------------------------------------------------------
+
+model Project {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  sourceLocale   String       @default("en")
+  deadline       DateTime?
+  createdById    String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  members      ProjectMember[]
+  videos       Video[]
+  invitations  Invitation[]
+  importBatches ImportBatch[]
+  jobs         AIGenerationJob[]
+
+  @@index([organizationId])
+}
+
+model ProjectMember {
+  id        String      @id @default(uuid())
+  projectId String
+  project   Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      ProjectRole
+  createdAt DateTime    @default(now())
+
+  @@unique([projectId, userId])
+  @@index([userId])
+}
+
+model Video {
+  id             String   @id @default(uuid())
+  projectId      String
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title          String
+  referenceUrl   String?
+  sourceMediaKey String?
+  durationMs     Int?
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  tracks LanguageTrack[]
+
+  @@unique([projectId, title])
+}
+
+model LanguageTrack {
+  id          String   @id @default(uuid())
+  videoId     String
+  video       Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  locale      String
+  displayName String
+  createdAt   DateTime @default(now())
+
+  segments Segment[]
+
+  @@unique([videoId, locale])
+}
+
+enum SegmentStatus {
+  UNASSIGNED
+  ASSIGNED
+  SUBMITTED
+  IN_REVIEW
+  CHANGES_REQUESTED
+  APPROVED
+  REOPENED
+}
+
+model Segment {
+  id                String        @id @default(uuid())
+  languageTrackId   String
+  languageTrack     LanguageTrack @relation(fields: [languageTrackId], references: [id], onDelete: Cascade)
+  externalId        String?
+  startMs           Int
+  endMs             Int
+  script            String
+  notes             String?
+  required          Boolean       @default(true)
+  status            SegmentStatus @default(UNASSIGNED)
+  revision          Int           @default(0)
+  currentVersionId  String?       @unique
+  currentVersion    RecordingVersion? @relation("SegmentCurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  approvedVersionId String?       @unique
+  approvedVersion   RecordingVersion? @relation("SegmentApprovedVersion", fields: [approvedVersionId], references: [id], onDelete: SetNull)
+  lastActivityAt    DateTime      @default(now())
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  assignments Assignment[]
+  versions    RecordingVersion[] @relation("SegmentVersions")
+  jobs        AIGenerationJob[]
+
+  @@unique([languageTrackId, externalId])
+  @@index([languageTrackId, status])
+}
+
+model Assignment {
+  id           String    @id @default(uuid())
+  segmentId    String
+  segment      Segment   @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+  actorUserId  String
+  actor        User      @relation("ActorAssignments", fields: [actorUserId], references: [id], onDelete: Cascade)
+  dueAt        DateTime?
+  active       Boolean   @default(true)
+  assignedById String
+  createdAt    DateTime  @default(now())
+  deactivatedAt DateTime?
+
+  @@index([actorUserId, active, dueAt])
+  @@index([segmentId, active])
+}
+
+// ---------------------------------------------------------------------------
+// Recordings & review
+// ---------------------------------------------------------------------------
+
+enum RecordingOrigin {
+  ACTOR_UPLOAD
+  AI_GENERATED
+}
+
+enum ProcessingStatus {
+  PENDING_UPLOAD
+  UPLOADED
+  PROCESSING
+  READY
+  FAILED
+}
+
+model RecordingVersion {
+  id               String           @id @default(uuid())
+  segmentId        String
+  segment          Segment          @relation("SegmentVersions", fields: [segmentId], references: [id], onDelete: Cascade)
+  versionNumber    Int
+  uploaderId       String?
+  uploader         User?            @relation(fields: [uploaderId], references: [id], onDelete: SetNull)
+  origin           RecordingOrigin  @default(ACTOR_UPLOAD)
+  objectKey        String           @unique
+  mimeType         String
+  originalFilename String?
+  sizeBytes        Int?
+  durationMs       Int?
+  peaks            Json?
+  processingStatus ProcessingStatus @default(PENDING_UPLOAD)
+  processingError  String?
+  idempotencyKey   String?          @unique
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  currentOf    Segment?         @relation("SegmentCurrentVersion")
+  approvedOf   Segment?         @relation("SegmentApprovedVersion")
+  comments     Comment[]
+  decisions    ReviewDecision[]
+  generationJob AIGenerationJob? @relation("JobOutput")
+
+  @@unique([segmentId, versionNumber])
+  @@index([segmentId, processingStatus])
+}
+
+enum ReviewDecisionType {
+  APPROVED
+  CHANGES_REQUESTED
+  REOPENED
+}
+
+model ReviewDecision {
+  id                 String             @id @default(uuid())
+  recordingVersionId String
+  recordingVersion   RecordingVersion   @relation(fields: [recordingVersionId], references: [id], onDelete: Cascade)
+  reviewerId         String
+  reviewer           User               @relation(fields: [reviewerId], references: [id], onDelete: Cascade)
+  decision           ReviewDecisionType
+  reason             String?
+  createdAt          DateTime           @default(now())
+
+  @@index([recordingVersionId, createdAt])
+}
+
+model Comment {
+  id                 String           @id @default(uuid())
+  recordingVersionId String
+  recordingVersion   RecordingVersion @relation(fields: [recordingVersionId], references: [id], onDelete: Cascade)
+  authorId           String
+  author             User             @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  timestampMs        Int
+  body               String
+  parentId           String?
+  parent             Comment?         @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies            Comment[]        @relation("CommentReplies")
+  resolvedAt         DateTime?
+  resolvedById       String?
+  editedAt           DateTime?
+  createdAt          DateTime         @default(now())
+
+  @@index([recordingVersionId, timestampMs])
+}
+
+// ---------------------------------------------------------------------------
+// Notifications, audit, outbox, jobs
+// ---------------------------------------------------------------------------
+
+enum NotificationType {
+  ASSIGNMENT_CREATED
+  SUBMISSION_READY
+  REVISION_REQUESTED
+  APPROVED
+  DUE_SOON
+  INVITATION
+  GENERATION_COMPLETED
+  GENERATION_FAILED
+}
+
+model Notification {
+  id           String           @id @default(uuid())
+  userId       String
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type         NotificationType
+  title        String
+  body         String?
+  resourceType String
+  resourceId   String
+  href         String
+  readAt       DateTime?
+  createdAt    DateTime         @default(now())
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+}
+
+model AuditEvent {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actorId        String?
+  action         String
+  entityType     String
+  entityId       String
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([entityType, entityId])
+}
+
+model OutboxEvent {
+  id          String    @id @default(uuid())
+  type        String
+  aggregateId String
+  payload     Json
+  createdAt   DateTime  @default(now())
+  processedAt DateTime?
+  attempts    Int       @default(0)
+  lastError   String?
+
+  @@index([processedAt, createdAt])
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+model BackgroundJob {
+  id          String    @id @default(uuid())
+  type        String
+  payload     Json
+  status      JobStatus @default(PENDING)
+  runAt       DateTime  @default(now())
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(5)
+  lockedAt    DateTime?
+  lockedBy    String?
+  lastError   String?
+  idempotencyKey String? @unique
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status, runAt])
+}
+
+// ---------------------------------------------------------------------------
+// Spreadsheet import
+// ---------------------------------------------------------------------------
+
+enum ImportStatus {
+  PREVIEWED
+  COMMITTED
+  FAILED
+}
+
+model ImportBatch {
+  id            String       @id @default(uuid())
+  projectId     String
+  project       Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  importerId    String
+  filename      String
+  status        ImportStatus
+  importedCount Int          @default(0)
+  rejectedCount Int          @default(0)
+  mapping       Json?
+  createdAt     DateTime     @default(now())
+
+  @@index([projectId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// AI providers
+// ---------------------------------------------------------------------------
+
+enum CredentialTestStatus {
+  NEVER
+  SUCCESS
+  FAILED
+}
+
+model AIProviderCredential {
+  id                    String               @id @default(uuid())
+  organizationId        String
+  organization          Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  providerId            String
+  encryptedSecret       String
+  keyVersion            String
+  last4                 String?
+  enabled               Boolean              @default(true)
+  isDefault             Boolean              @default(false)
+  lastTestStatus        CredentialTestStatus @default(NEVER)
+  lastTestedAt          DateTime?
+  lastTestMessage       String?
+  monthlyCharacterQuota Int?
+  updatedById           String
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  @@unique([organizationId, providerId])
+}
+
+model AIUsage {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  providerId     String
+  period         String // YYYY-MM
+  characters     Int          @default(0)
+  requests       Int          @default(0)
+
+  @@unique([organizationId, providerId, period])
+}
+
+enum GenerationStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+model AIGenerationJob {
+  id                String           @id @default(uuid())
+  organizationId    String
+  organization      Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  projectId         String
+  project           Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  segmentId         String
+  segment           Segment          @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+  requestedById     String
+  providerId        String
+  modelId           String
+  voiceId           String
+  voiceName         String?
+  text              String
+  options           Json?
+  status            GenerationStatus @default(QUEUED)
+  attemptCount      Int              @default(0)
+  errorCode         String?
+  errorMessage      String?
+  providerRequestId String?
+  characterCount    Int              @default(0)
+  outputRecordingId String?          @unique
+  outputRecording   RecordingVersion? @relation("JobOutput", fields: [outputRecordingId], references: [id], onDelete: SetNull)
+  cancelRequestedAt DateTime?
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@index([segmentId, createdAt])
+  @@index([organizationId, status])
+}

@@ -1,0 +1,5 @@
+video,language,segment_external_id,start_ms,end_ms,script,actor_email,due_date,notes,required
+Episode 1,es,E1-001,00:00:02.500,00:00:05.900,"Bienvenidos de nuevo. Hoy exploramos el corazón de la ciudad.",maria.actor@example.com,2026-11-20,Warm and inviting,yes
+Episode 1,es,E1-002,00:00:06.200,00:00:09.800,"Cada esquina cuenta una historia diferente.",maria.actor@example.com,2026-11-20,,yes
+Episode 1,de,E1-001,2500,5900,"Willkommen zurück. Heute erkunden wir das Herz der Stadt.",jonas.actor@example.com,2026-11-21,Energetic,yes
+Episode 1,de,E1-002,6200,9800,"Jede Ecke erzählt eine andere Geschichte.",jonas.actor@example.com,2026-11-21,,no
