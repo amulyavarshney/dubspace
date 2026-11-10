@@ -1,0 +1,40 @@
+# The workspace server. GitHub Pages only hosts docs/index.html.
+# Render sets RENDER_EXTERNAL_URL; the app uses it as APP_BASE_URL.
+# Demo sign-in after the first boot: owner@dubspace.test / password123
+# CREDENTIAL_ENCRYPTION_KEY must be `openssl rand -base64 32` (decodes to 32 bytes).
+
+services:
+  - type: web
+    name: dubspace
+    runtime: node
+    plan: free
+    healthCheckPath: /api/health
+    buildCommand: corepack enable && corepack prepare pnpm@10.12.1 --activate && pnpm install --frozen-lockfile --prod=false && pnpm build
+    startCommand: pnpm db:deploy && pnpm db:seed && pnpm exec next start -H 0.0.0.0 -p $PORT
+    envVars:
+      - key: NODE_VERSION
+        value: "22.14.0"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: dubspace-db
+          property: connectionString
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: CREDENTIAL_ENCRYPTION_KEY
+        sync: false
+      - key: CREDENTIAL_ENCRYPTION_KEY_VERSION
+        value: v1
+      - key: INLINE_WORKER
+        value: "true"
+      - key: STORAGE_DRIVER
+        value: local
+      - key: AI_MOCK_PROVIDER_ENABLED
+        value: "true"
+      - key: EMAIL_TRANSPORT
+        value: console
+
+databases:
+  - name: dubspace-db
+    plan: free
+    databaseName: dubbing_workspace
+    user: dubspace
