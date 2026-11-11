@@ -1,8 +1,7 @@
 name: Deploy GitHub Pages
 
-# Static project page. The Next.js server, database, and worker are not part of this site.
-# Site: https://amulyavarshney.github.io/dubspace/
-# Set the repo website to that URL so the portfolio shows Live Demo.
+# Redirects https://amulyavarshney.github.io/dubspace/ to the running app.
+# App: https://dubspace.onrender.com/
 
 on:
   push:
